@@ -142,12 +142,40 @@ int main(int, char **) {
       const std::string img_path = ASSET_PATH "/schmetterling_mid.jpg";
 
       // 1. load image
+      static unsigned char* image_data = nullptr;
+      static int img_w = 0, img_h = 0, img_channels = 0;
+      static GLuint original_texture_id = 0;
+      static bool image_loaded = false;
+
       // 2. upload image to gpu
+      if (!image_loaded) {
+        image_data = load_image(img_path, img_w, img_h, img_channels);
+        if (image_data) {
+          // Create OpenGL texture
+          glGenTextures(1, &original_texture_id);
+          glBindTexture(GL_TEXTURE_2D, original_texture_id);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+          glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, img_w, img_h, 0, GL_RGB, GL_UNSIGNED_BYTE, image_data);
+            
+          spdlog::info("Image loaded successfully: {}x{}x{}", img_w, img_h, img_channels);
+          image_loaded = true;
+        } else {
+          spdlog::error("Failed to load image: {}", img_path);
+          return 1;
+        }
+      }
+
       // 3. display image
       // (https://github.com/ocornut/imgui/wiki/Image-Loading-and-Displaying-Examples)
       ImGui::Text("Original");
-      // ImGui::Image((ImTextureID)(intptr_t)image1_tex_id, ImVec2(img_w,
-      // img_h));
+      if (image_loaded && original_texture_id) {
+        ImGui::Image((ImTextureID)(intptr_t)original_texture_id, ImVec2(img_w, img_h));
+      } else {
+        ImGui::Text("Failed to load image");
+      }
 
       // 4. add a simple imgui slider here to scale image from 0 to 100%
       // if (ImGui::SliderFloat("Scale Image By", &target_scale_perc, 10.0f,
