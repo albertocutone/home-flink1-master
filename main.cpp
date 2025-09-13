@@ -66,6 +66,45 @@ std::vector<std::vector<float>> calculate_energy(const unsigned char* pixels, in
   return energy;
 }
 
+// Find low energy vertical seams using greedy approach
+std::vector<int> find_low_energy_seam(const std::vector<std::vector<float>>& energy, int width, int height) {
+  std::vector<int> seam(height);
+  
+  // Start from the top row - find pixel with minimum energy
+  int min_x = 0;
+  float min_energy = energy[0][0];
+  for (int x = 1; x < width; x++) {
+    if (energy[0][x] < min_energy) {
+      min_energy = energy[0][x];
+      min_x = x;
+    }
+  }
+  seam[0] = min_x;
+  
+  // For each subsequent row, choose the neighbor with minimum energy
+  for (int y = 1; y < height; y++) {
+    int current_x = seam[y - 1];
+    int best_x = current_x;
+    float best_energy = energy[y][current_x];
+    
+    // Check left neighbor
+    if (current_x > 0 && energy[y][current_x - 1] < best_energy) {
+      best_energy = energy[y][current_x - 1];
+      best_x = current_x - 1;
+    }
+    
+    // Check right neighbor
+    if (current_x < width - 1 && energy[y][current_x + 1] < best_energy) {
+      best_energy = energy[y][current_x + 1];
+      best_x = current_x + 1;
+    }
+    
+    seam[y] = best_x;
+  }
+  
+  return seam;
+}
+
 int main(int, char **) {
   // Setup window
   glfwSetErrorCallback(glfw_error_callback);
@@ -231,7 +270,9 @@ int main(int, char **) {
         spdlog::info("Energy map computed successfully");
         
         // 6. find low energy seams
-        // auto approx_seams = find_low_energy_seam(orig_energy, img_w, img_h);
+        spdlog::info("Finding low energy seam for removal");
+        auto approx_seam = find_low_energy_seam(orig_energy, img_w, img_h);
+        spdlog::info("Found seam path from top to bottom");
 
         // 7. now remove seems to reduce image size
 
