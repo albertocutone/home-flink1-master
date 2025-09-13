@@ -12,6 +12,8 @@
 #include <stb_image.h>
 
 #include <string>
+#include <vector>
+#include <cmath>
 
 static void glfw_error_callback(int error, const char *description) {
   fprintf(stderr, "Glfw Error %d: %s\n", error, description);
@@ -26,6 +28,42 @@ unsigned char *load_image(const std::string &path, int &width, int &height,
     spdlog::error("Failed to load image: {}", path.c_str());
   }
   return pixels;
+}
+
+// Calculate energy map using gradient approach (simple Sobel-like operator)
+std::vector<std::vector<float>> calculate_energy(const unsigned char* pixels, int width, int height, int channels) {
+  std::vector<std::vector<float>> energy(height, std::vector<float>(width, 0.0f));
+  
+  for (int y = 1; y < height - 1; y++) {
+    for (int x = 1; x < width - 1; x++) {
+      // Get current pixel index
+      int idx = (y * width + x) * channels;
+      
+      // Calculate horizontal gradient (Gx)
+      int left_idx = (y * width + (x - 1)) * channels;
+      int right_idx = (y * width + (x + 1)) * channels;
+      
+      float gx_r = pixels[right_idx] - pixels[left_idx];
+      float gx_g = pixels[right_idx + 1] - pixels[left_idx + 1];
+      float gx_b = pixels[right_idx + 2] - pixels[left_idx + 2];
+      
+      // Calculate vertical gradient (Gy)
+      int top_idx = ((y - 1) * width + x) * channels;
+      int bottom_idx = ((y + 1) * width + x) * channels;
+      
+      float gy_r = pixels[bottom_idx] - pixels[top_idx];
+      float gy_g = pixels[bottom_idx + 1] - pixels[top_idx + 1];
+      float gy_b = pixels[bottom_idx + 2] - pixels[top_idx + 2];
+      
+      // Calculate energy as magnitude of gradient
+      float gx_mag = sqrt(gx_r * gx_r + gx_g * gx_g + gx_b * gx_b);
+      float gy_mag = sqrt(gy_r * gy_r + gy_g * gy_g + gy_b * gy_b);
+      
+      energy[y][x] = gx_mag + gy_mag;
+    }
+  }
+  
+  return energy;
 }
 
 int main(int, char **) {
@@ -146,6 +184,7 @@ int main(int, char **) {
       static int img_w = 0, img_h = 0, img_channels = 0;
       static GLuint original_texture_id = 0;
       static bool image_loaded = false;
+      static float target_scale_perc = 100.0f;  // Scale percentage (10-100%)
 
       // 2. upload image to gpu
       if (!image_loaded) {
@@ -178,13 +217,19 @@ int main(int, char **) {
       }
 
       // 4. add a simple imgui slider here to scale image from 0 to 100%
-      // if (ImGui::SliderFloat("Scale Image By", &target_scale_perc, 10.0f,
-      //                        100.0f)) {
-      // }
       bool needs_recompute = false;
-      if (needs_recompute) {
+      if (ImGui::SliderFloat("Scale Image By", &target_scale_perc, 10.0f, 100.0f,"%.0f%%")) {
+        needs_recompute = true;
+      }
+      
+      // Calculate target width based on slider value
+      int target_width = (int)(img_w * target_scale_perc / 100.0f);
+      if (needs_recompute && image_loaded) {
         // 5. Compute image energy
-        // auto orig_energy =  calculate_energy(pixels, img_w, img_h, img_chan);
+        spdlog::info("Computing energy map for {}x{} image, target width: {}", img_w, img_h, target_width);
+        auto orig_energy = calculate_energy(image_data, img_w, img_h, img_channels);
+        spdlog::info("Energy map computed successfully");
+        
         // 6. find low energy seams
         // auto approx_seams = find_low_energy_seam(orig_energy, img_w, img_h);
 
