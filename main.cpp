@@ -11,6 +11,8 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
+#include "seam_carving.h"
+
 #include <string>
 #include <vector>
 #include <cmath>
@@ -66,44 +68,6 @@ std::vector<std::vector<float>> calculate_energy(const unsigned char* pixels, in
   return energy;
 }
 
-// Find low energy vertical seams using greedy approach
-std::vector<int> find_low_energy_seam(const std::vector<std::vector<float>>& energy, int width, int height) {
-  std::vector<int> seam(height);
-  
-  // Start from the top row - find pixel with minimum energy
-  int min_x = 0;
-  float min_energy = energy[0][0];
-  for (int x = 1; x < width; x++) {
-    if (energy[0][x] < min_energy) {
-      min_energy = energy[0][x];
-      min_x = x;
-    }
-  }
-  seam[0] = min_x;
-  
-  // For each subsequent row, choose the neighbor with minimum energy
-  for (int y = 1; y < height; y++) {
-    int current_x = seam[y - 1];
-    int best_x = current_x;
-    float best_energy = energy[y][current_x];
-    
-    // Check left neighbor
-    if (current_x > 0 && energy[y][current_x - 1] < best_energy) {
-      best_energy = energy[y][current_x - 1];
-      best_x = current_x - 1;
-    }
-    
-    // Check right neighbor
-    if (current_x < width - 1 && energy[y][current_x + 1] < best_energy) {
-      best_energy = energy[y][current_x + 1];
-      best_x = current_x + 1;
-    }
-    
-    seam[y] = best_x;
-  }
-  
-  return seam;
-}
 
 int main(int, char **) {
   // Setup window
@@ -224,6 +188,7 @@ int main(int, char **) {
       static GLuint original_texture_id = 0;
       static bool image_loaded = false;
       static float target_scale_perc = 100.0f;  // Scale percentage (10-100%)
+      static SeamCarving::Algorithm selected_algorithm = SeamCarving::Algorithm::GREEDY;
 
       // 2. upload image to gpu
       if (!image_loaded) {
@@ -261,6 +226,23 @@ int main(int, char **) {
         needs_recompute = true;
       }
       
+      // Algorithm selection radio buttons
+      ImGui::Text("Seam Finding Algorithm:");
+      bool algo_changed = false;
+      if (ImGui::RadioButton("Greedy (Fast)", selected_algorithm == SeamCarving::Algorithm::GREEDY)) {
+        selected_algorithm = SeamCarving::Algorithm::GREEDY;
+        algo_changed = true;
+      }
+      ImGui::SameLine();
+      if (ImGui::RadioButton("Dynamic Programming (Optimal)", selected_algorithm == SeamCarving::Algorithm::DYNAMIC)) {
+        selected_algorithm = SeamCarving::Algorithm::DYNAMIC;
+        algo_changed = true;
+      }
+      
+      if (algo_changed) {
+        needs_recompute = true;
+      }
+      
       // Calculate target width based on slider value
       int target_width = (int)(img_w * target_scale_perc / 100.0f);
       if (needs_recompute && image_loaded) {
@@ -270,9 +252,10 @@ int main(int, char **) {
         spdlog::info("Energy map computed successfully");
         
         // 6. find low energy seams
-        spdlog::info("Finding low energy seam for removal");
-        auto approx_seam = find_low_energy_seam(orig_energy, img_w, img_h);
-        spdlog::info("Found seam path from top to bottom");
+        const char* algo_name = (selected_algorithm == SeamCarving::Algorithm::GREEDY) ? "Greedy" : "Dynamic Programming";
+        spdlog::info("Finding low energy seam for removal using {} algorithm", algo_name);
+        auto approx_seam = SeamCarving::find_low_energy_seam(orig_energy, img_w, img_h, selected_algorithm);
+        spdlog::info("Found seam path from top to bottom using {} algorithm", algo_name);
 
         // 7. now remove seems to reduce image size
 

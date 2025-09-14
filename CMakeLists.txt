@@ -26,11 +26,14 @@ find_package(fmt CONFIG REQUIRED)
 set(libraries ${libraries} fmt::fmt)
 
 ## Create main executable
-add_executable(Flink-Home ${CMAKE_SOURCE_DIR}/main.cpp)
+add_executable(Flink-Home
+    ${CMAKE_SOURCE_DIR}/main.cpp
+    ${CMAKE_SOURCE_DIR}/seam_carving.cpp
+)
 
 target_include_directories(
 	Flink-Home
-  	PRIVATE 
+  	PRIVATE
 )
 
 target_link_libraries(Flink-Home PRIVATE ${libraries})
