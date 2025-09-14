@@ -32,44 +32,14 @@ unsigned char *load_image(const std::string &path, int &width, int &height,
   return pixels;
 }
 
-// Calculate energy map using gradient approach (simple Sobel-like operator)
-std::vector<std::vector<float>> calculate_energy(const unsigned char* pixels, int width, int height, int channels) {
-  std::vector<std::vector<float>> energy(height, std::vector<float>(width, 0.0f));
-  
-  for (int y = 1; y < height - 1; y++) {
-    for (int x = 1; x < width - 1; x++) {
-      // Get current pixel index
-      int idx = (y * width + x) * channels;
-      
-      // Calculate horizontal gradient (Gx)
-      int left_idx = (y * width + (x - 1)) * channels;
-      int right_idx = (y * width + (x + 1)) * channels;
-      
-      float gx_r = pixels[right_idx] - pixels[left_idx];
-      float gx_g = pixels[right_idx + 1] - pixels[left_idx + 1];
-      float gx_b = pixels[right_idx + 2] - pixels[left_idx + 2];
-      
-      // Calculate vertical gradient (Gy)
-      int top_idx = ((y - 1) * width + x) * channels;
-      int bottom_idx = ((y + 1) * width + x) * channels;
-      
-      float gy_r = pixels[bottom_idx] - pixels[top_idx];
-      float gy_g = pixels[bottom_idx + 1] - pixels[top_idx + 1];
-      float gy_b = pixels[bottom_idx + 2] - pixels[top_idx + 2];
-      
-      // Calculate energy as magnitude of gradient
-      float gx_mag = sqrt(gx_r * gx_r + gx_g * gx_g + gx_b * gx_b);
-      float gy_mag = sqrt(gy_r * gy_r + gy_g * gy_g + gy_b * gy_b);
-      
-      energy[y][x] = gx_mag + gy_mag;
-    }
-  }
-  
-  return energy;
-}
 
 
 int main(int, char **) {
+  // Setup spdlog for optimized logging
+  spdlog::set_level(spdlog::level::info);  // Show info and above (reduce verbose debug output)
+  spdlog::set_pattern("[%H:%M:%S] [%l] %v");  // Show timestamp and level
+  spdlog::info("Application starting...");
+
   // Setup window
   glfwSetErrorCallback(glfw_error_callback);
   if (!glfwInit())
@@ -197,6 +167,10 @@ int main(int, char **) {
           // Create OpenGL texture
           glGenTextures(1, &original_texture_id);
           glBindTexture(GL_TEXTURE_2D, original_texture_id);
+            
+          // Set pixel alignment - crucial for preventing stride issues
+          glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+            
           glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
           glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
           glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -245,27 +219,60 @@ int main(int, char **) {
       
       // Calculate target width based on slider value
       int target_width = (int)(img_w * target_scale_perc / 100.0f);
+      
+      // Static variables for processed image
+      static std::vector<unsigned char> carved_image_data;
+      static GLuint carved_texture_id = 0;
+      static int carved_width = 0;
+      static bool carved_image_valid = false;
+      
       if (needs_recompute && image_loaded) {
-        // 5. Compute image energy
-        spdlog::info("Computing energy map for {}x{} image, target width: {}", img_w, img_h, target_width);
-        auto orig_energy = calculate_energy(image_data, img_w, img_h, img_channels);
-        spdlog::info("Energy map computed successfully");
-        
-        // 6. find low energy seams
+        // Use iterative seam removal to reduce image width
         const char* algo_name = (selected_algorithm == SeamCarving::Algorithm::GREEDY) ? "Greedy" : "Dynamic Programming";
-        spdlog::info("Finding low energy seam for removal using {} algorithm", algo_name);
-        auto approx_seam = SeamCarving::find_low_energy_seam(orig_energy, img_w, img_h, selected_algorithm);
-        spdlog::info("Found seam path from top to bottom using {} algorithm", algo_name);
-
-        // 7. now remove seems to reduce image size
-
-        // 8. Primitive rescaling using for example bilinear interpolation
-        // (horizontal only)
+        spdlog::info("Starting iterative seam carving: {}x{} -> {}x{} using {} algorithm", 
+                     img_w, img_h, target_width, img_h, algo_name);
+        
+        // Perform iterative seam removal
+        auto result = SeamCarving::reduce_width_iteratively(
+            image_data, img_w, img_h, img_channels, target_width, selected_algorithm);
+        auto result_pixels = result.first;
+        auto final_width = result.second;
+        
+        spdlog::info("Seam carving completed: final size {}x{}", final_width, img_h);
+        
+        // Store the result
+        carved_image_data = std::move(result_pixels);
+        carved_width = final_width;
+        
+        // Create/update OpenGL texture for carved image
+        if (carved_texture_id == 0) {
+          glGenTextures(1, &carved_texture_id);
+        }
+        glBindTexture(GL_TEXTURE_2D, carved_texture_id);
+        
+        // Set pixel alignment for carved image texture too
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, carved_width, img_h, 0, GL_RGB, 
+                     GL_UNSIGNED_BYTE, carved_image_data.data());
+      
+        
+        carved_image_valid = true;
+        spdlog::info("Created OpenGL texture for carved image: {}x{}", carved_width, img_h);
       }
 
       ImGui::Text("Processed (Seam Carved)");
-      // ImGui::Image((ImTextureID)(intptr_t)image_processed_tex_id,
-      //              ImVec2(working_width, img_h));
+      if (carved_image_valid && carved_texture_id) {
+        ImGui::Image((ImTextureID)(intptr_t)carved_texture_id, ImVec2(carved_width, img_h));
+        ImGui::Text("Carved image size: %dx%d (removed %d seams)", carved_width, img_h, img_w - carved_width);
+      } else {
+        ImGui::Text("Move the slider to see seam carved result");
+      }
 
       ImGui::Text("Primitive Resized");
       // ImGui::Image((ImTextureID)(intptr_t)primitive_tex_id,

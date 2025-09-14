@@ -1,6 +1,9 @@
 #include "seam_carving.h"
 #include <limits>
 #include <algorithm>
+#include <cmath>
+#include <chrono>
+#include <spdlog/spdlog.h>
 
 namespace SeamCarving {
 
@@ -132,6 +135,150 @@ std::vector<int> find_low_energy_seam(
         default:
             return find_low_energy_seam_greedy(energy, width, height);
     }
+}
+
+std::vector<std::vector<float>> calculate_energy(
+    const unsigned char* pixels, int width, int height, int channels) {
+  
+  std::vector<std::vector<float>> energy(height, std::vector<float>(width, 0.0f));
+  
+  // Sobel kernels
+  int sobel_x[3][3] = {{-1, 0, 1}, {-2, 0, 2}, {-1, 0, 1}};
+  int sobel_y[3][3] = {{-1, -2, -1}, {0, 0, 0}, {1, 2, 1}};
+  
+  for (int y = 1; y < height - 1; y++) {
+    for (int x = 1; x < width - 1; x++) {
+      float gx = 0, gy = 0;
+      
+      // Apply Sobel kernels with proper convolution
+      for (int ky = -1; ky <= 1; ky++) {
+        for (int kx = -1; kx <= 1; kx++) {
+          int idx = ((y + ky) * width + (x + kx)) * channels;
+          
+          // Convert to grayscale
+          float gray = 0.299f * pixels[idx] + 0.587f * pixels[idx + 1] + 0.114f * pixels[idx + 2];
+          
+          gx += gray * sobel_x[ky + 1][kx + 1];
+          gy += gray * sobel_y[ky + 1][kx + 1];
+        }
+      }
+      
+      energy[y][x] = sqrt(gx * gx + gy * gy);
+    }
+  }
+  
+  return energy;
+}
+
+std::vector<unsigned char> remove_seam(
+    const unsigned char* pixels,
+    int width,
+    int height,
+    int channels,
+    const std::vector<int>& seam
+) {
+    // Calculate new width and allocate memory for result
+    int new_width = width - 1;
+    std::vector<unsigned char> result(new_width * height * channels);
+    
+    // For each row, copy pixels excluding the seam pixel
+    for (int y = 0; y < height; y++) {
+        int seam_x = seam[y];
+        int result_idx = 0;
+        
+        for (int x = 0; x < width; x++) {
+            if (x != seam_x) {
+                // Copy pixel to new image
+                int src_idx = (y * width + x) * channels;
+                int dst_idx = (y * new_width + result_idx) * channels;
+                
+                for (int c = 0; c < channels; c++) {
+                    result[dst_idx + c] = pixels[src_idx + c];
+                }
+                result_idx++;
+            }
+        }
+    }
+    
+    return result;
+}
+
+std::pair<std::vector<unsigned char>, int> reduce_width_iteratively(
+    const unsigned char* pixels,
+    int original_width,
+    int height,
+    int channels,
+    int target_width,
+    Algorithm algorithm
+) {
+    if (target_width >= original_width) {
+        // No reduction needed, return copy of original
+        std::vector<unsigned char> result(pixels, pixels + (original_width * height * channels));
+        return std::make_pair(result, original_width);
+    }
+    
+    if (target_width <= 0) {
+        // Invalid target width
+        std::vector<unsigned char> empty;
+        return std::make_pair(empty, 0);
+    }
+    
+    // Start with copy of original image
+    std::vector<unsigned char> current_pixels(pixels, pixels + (original_width * height * channels));
+    int current_width = original_width;
+    
+    int seams_to_remove = original_width - target_width;
+    int seams_removed = 0;
+      
+    // Progress tracking variables
+    int progress_update_interval = std::max(1, seams_to_remove / 10); // Update every 10% or at least every seam
+    auto batch_start_time = std::chrono::high_resolution_clock::now();
+      
+    spdlog::info("Starting seam carving: removing {} seams from {}x{} image", 
+                 seams_to_remove, original_width, height);
+      
+    // Iteratively remove seams until we reach target width
+    while (current_width > target_width) {
+        seams_removed++;
+        
+        if (seams_removed % progress_update_interval == 0 || seams_removed == seams_to_remove) {
+            auto current_time = std::chrono::high_resolution_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - batch_start_time);
+            float avg_time_per_seam = static_cast<float>(elapsed.count()) / seams_removed;
+            int estimated_remaining_ms = static_cast<int>((seams_to_remove - seams_removed) * avg_time_per_seam);
+            
+            spdlog::info("Progress: {}/{} seams removed ({}% complete) - Avg: {:.1f}ms/seam, ETA: {}s", 
+                         seams_removed, seams_to_remove,
+                         static_cast<int>((seams_removed * 100.0) / seams_to_remove),
+                         avg_time_per_seam,
+                         estimated_remaining_ms / 1000);
+        }
+        
+        auto start_time = std::chrono::high_resolution_clock::now();
+        
+        // Calculate energy for current image state
+        auto energy = calculate_energy(current_pixels.data(), current_width, height, channels);
+        
+        // Find optimal seam to remove
+        auto seam = find_low_energy_seam(energy, current_width, height, algorithm);
+        
+        // Remove the seam from current image
+        current_pixels = remove_seam(current_pixels.data(), current_width, height, channels, seam);
+        current_width--;
+        
+        // Log detailed timing only for debug builds or when specifically enabled
+        if (spdlog::get_level() <= spdlog::level::debug) {
+            auto end_time = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+            if (duration.count() > 50) { // Only log slow iterations
+                spdlog::debug("Slow iteration {} took {}ms (width: {})", seams_removed, duration.count(), current_width + 1);
+            }
+        }
+    }
+    
+    spdlog::info("Seam carving completed: final image size {}x{}", current_width, height);
+    
+    return std::make_pair(current_pixels, current_width);
 }
 
 } // namespace SeamCarving
