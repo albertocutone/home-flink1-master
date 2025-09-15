@@ -13,8 +13,6 @@
 
 #include "seam_carving.h"
 
-#include <string>
-#include <vector>
 #include <cmath>
 
 static void glfw_error_callback(int error, const char *description) {
@@ -62,7 +60,6 @@ bool create_or_update_texture(GLuint& texture_id, const void* data, int width, i
   GLenum error = glGetError();
   if (error != GL_NO_ERROR) {
     spdlog::error("Failed to upload texture data for {}: OpenGL error {}", description, error);
-    stbi_image_free(data);
     return false;
   }
   
@@ -187,6 +184,13 @@ int main(int, char **) {
 
   // Our state
   static bool show_demo_window = false;
+  
+  // Global texture IDs for cleanup
+  static GLuint original_texture_id = 0;
+  static GLuint carved_texture_id = 0;
+  static GLuint primitive_texture_id = 0;
+  static unsigned char* image_data = nullptr;
+  static unsigned char* primitive_resized_data = nullptr;
 
   ImVec4 clear_color = ImVec4(0.168f, 0.394f, 0.534f, 1.00f);
 
@@ -234,23 +238,31 @@ int main(int, char **) {
       const std::string img_path = ASSET_PATH "/schmetterling_mid.jpg";
 
       // 1. load image
-      static unsigned char* image_data = nullptr;
       static int img_w = 0, img_h = 0, img_channels = 0;
-      static GLuint original_texture_id = 0;
       static bool image_loaded = false;
       static float target_scale_perc = 100.0f;  // Scale percentage (10-100%)
       static SeamCarving::Algorithm selected_algorithm = SeamCarving::Algorithm::GREEDY;
 
       // 2. upload image to gpu
       if (!image_loaded) {
-        image_data = load_image(img_path, img_w, img_h, img_channels);
-        if (image_data) {
+        unsigned char* temp_image_data = load_image(img_path, img_w, img_h, img_channels);
+        if (temp_image_data) {
           spdlog::info("Image loaded successfully: {}x{}x{}", img_w, img_h, img_channels);
           
+          // Store the image data for seam carving
+          size_t data_size = img_w * img_h * img_channels;
+          image_data = new unsigned char[data_size];
+          std::memcpy(image_data, temp_image_data, data_size);
+          
           // Create OpenGL texture using helper function
-          if (create_or_update_texture(original_texture_id, image_data, img_w, img_h, "original image")) {
+          if (create_or_update_texture(original_texture_id, temp_image_data, img_w, img_h, "original image")) {
             image_loaded = true;
+            // Free the temp image data after uploading to GPU - stbi_image_free is for data from stbi_load
+            stbi_image_free(temp_image_data);
           } else {
+            stbi_image_free(temp_image_data);
+            delete[] image_data;
+            image_data = nullptr;
             return 1;
           }
         } else {
@@ -296,13 +308,10 @@ int main(int, char **) {
       
       // Static variables for processed image
       static std::vector<unsigned char> carved_image_data;
-      static GLuint carved_texture_id = 0;
       static int carved_width = 0;
       static bool carved_image_valid = false;
         
       // Static variables for primitive resized image
-      static unsigned char* primitive_resized_data = nullptr;
-      static GLuint primitive_texture_id = 0;
       static bool primitive_image_valid = false;
       
       if (needs_recompute && image_loaded) {
@@ -387,7 +396,23 @@ int main(int, char **) {
     glfwSwapBuffers(window);
   }
 
-  // Cleanup
+  // Cleanup OpenGL textures
+  GLuint textures_to_delete[] = {original_texture_id, carved_texture_id, primitive_texture_id};
+  for (GLuint texture : textures_to_delete) {
+    if (texture != 0) {
+      glDeleteTextures(1, &texture);
+    }
+  }
+  
+  // Cleanup image data
+  if (image_data) {
+    delete[] image_data;
+  }
+  if (primitive_resized_data) {
+    delete[] primitive_resized_data;
+  }
+
+  // Cleanup ImGui and GLFW
   ImGui_ImplOpenGL3_Shutdown();
   ImGui_ImplGlfw_Shutdown();
   ImGui::DestroyContext();
