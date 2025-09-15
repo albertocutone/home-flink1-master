@@ -49,76 +49,54 @@ std::vector<int> find_low_energy_seam_greedy(
     return seam;
 }
 
-std::vector<int> find_low_energy_seam_dyn(
-    const std::vector<std::vector<float>>& energy, 
-    int width, 
-    int height
-) {
-    // Step 1: Create DP table to store minimum cumulative energy to reach each pixel
-    std::vector<std::vector<float>> dp(height, std::vector<float>(width, std::numeric_limits<float>::max()));
-    
-    // Step 2: Initialize first row - cumulative energy equals pixel energy
-    for (int x = 0; x < width; x++) {
-        dp[0][x] = energy[0][x];
+std::vector<int> find_low_energy_seam_dyn(const std::vector<std::vector<float>>& energy, int width, int height) {
+  // Rolling array optimization: use only two rows instead of full DP table
+  std::vector<float> prev_row(width);
+  std::vector<float> curr_row(width);
+  std::vector<std::vector<int>> backtrack(height, std::vector<int>(width, 0));
+  
+  // Initialize first row
+  for (int x = 0; x < width; ++x) {
+    prev_row[x] = energy[0][x];
+  }
+  
+  // DP: accumulate minimum energy for each pixel using rolling arrays
+  for (int y = 1; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      float min_energy = prev_row[x];
+      int min_x = x;
+      if (x > 0 && prev_row[x-1] < min_energy) {
+        min_energy = prev_row[x-1];
+        min_x = x-1;
+      }
+      if (x < width-1 && prev_row[x+1] < min_energy) {
+        min_energy = prev_row[x+1];
+        min_x = x+1;
+      }
+      curr_row[x] = energy[y][x] + min_energy;
+      backtrack[y][x] = min_x;
     }
-    
-    // Step 3: Fill DP table row by row using recurrence relation
-    for (int y = 1; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-            // Consider all possible previous positions that can reach current pixel (x, y)
-            // Due to connectivity constraint, can only come from: (y-1, x-1), (y-1, x), (y-1, x+1)
-            
-            // Can come from directly above: (y-1, x)
-            dp[y][x] = dp[y-1][x] + energy[y][x];
-            
-            // Can come from upper-left diagonal: (y-1, x-1)
-            if (x > 0) {
-                dp[y][x] = std::min(dp[y][x], dp[y-1][x-1] + energy[y][x]);
-            }
-            
-            // Can come from upper-right diagonal: (y-1, x+1)  
-            if (x < width - 1) {
-                dp[y][x] = std::min(dp[y][x], dp[y-1][x+1] + energy[y][x]);
-            }
-        }
+    // Swap rows for next iteration
+    prev_row.swap(curr_row);
+  }
+  
+  // Find end of minimum seam (result is now in prev_row after final swap)
+  int min_end_x = 0;
+  float min_total_energy = prev_row[0];
+  for (int x = 1; x < width; ++x) {
+    if (prev_row[x] < min_total_energy) {
+      min_total_energy = prev_row[x];
+      min_end_x = x;
     }
-    
-    // Step 4: Find the ending position with minimum cumulative energy in bottom row
-    int min_end_x = 0;
-    float min_cumulative_energy = dp[height-1][0];
-    for (int x = 1; x < width; x++) {
-        if (dp[height-1][x] < min_cumulative_energy) {
-            min_cumulative_energy = dp[height-1][x];
-            min_end_x = x;
-        }
-    }
-    
-    // Step 5: Backtrack to reconstruct the optimal seam path
-    std::vector<int> seam(height);
-    seam[height-1] = min_end_x;  // Start from optimal ending position
-    
-    for (int y = height - 2; y >= 0; y--) {
-        int current_x = seam[y + 1];
-        int best_prev_x = current_x;
-        float best_prev_energy = dp[y][current_x];
-        
-        // Check which previous position led to current optimal path
-        // Left diagonal: (y, current_x - 1)
-        if (current_x > 0 && dp[y][current_x - 1] < best_prev_energy) {
-            best_prev_energy = dp[y][current_x - 1];
-            best_prev_x = current_x - 1;
-        }
-        
-        // Right diagonal: (y, current_x + 1)
-        if (current_x < width - 1 && dp[y][current_x + 1] < best_prev_energy) {
-            best_prev_energy = dp[y][current_x + 1];
-            best_prev_x = current_x + 1;
-        }
-        
-        seam[y] = best_prev_x;
-    }
-    
-    return seam;
+  }
+  
+  // Backtrack to get seam
+  std::vector<int> seam(height);
+  seam[height-1] = min_end_x;
+  for (int y = height-1; y > 0; --y) {
+    seam[y-1] = backtrack[y][seam[y]];
+  }
+  return seam;
 }
 
 std::vector<int> find_low_energy_seam(
