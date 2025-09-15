@@ -70,6 +70,49 @@ bool create_or_update_texture(GLuint& texture_id, const void* data, int width, i
   return true;
 }
 
+// Bilinear interpolation downscaling function
+unsigned char* downscale_image_bilinear(const unsigned char* src_data, 
+                                       int src_width, int src_height, int channels,
+                                       int dst_width, int dst_height) {
+  unsigned char* dst_data = new unsigned char[dst_width * dst_height * channels];
+  
+  float x_ratio = (float)src_width / dst_width;
+  float y_ratio = (float)src_height / dst_height;
+  
+  for (int y = 0; y < dst_height; y++) {
+    for (int x = 0; x < dst_width; x++) {
+      float src_x = x * x_ratio;
+      float src_y = y * y_ratio;
+      
+      int x1 = (int)src_x;
+      int y1 = (int)src_y;
+      int x2 = std::min(x1 + 1, src_width - 1);
+      int y2 = std::min(y1 + 1, src_height - 1);
+      
+      float dx = src_x - x1;
+      float dy = src_y - y1;
+      
+      for (int c = 0; c < channels; c++) {
+        // Get the four surrounding pixels
+        float p11 = src_data[(y1 * src_width + x1) * channels + c];
+        float p12 = src_data[(y1 * src_width + x2) * channels + c];
+        float p21 = src_data[(y2 * src_width + x1) * channels + c];
+        float p22 = src_data[(y2 * src_width + x2) * channels + c];
+        
+        // Bilinear interpolation
+        float interpolated = p11 * (1 - dx) * (1 - dy) +
+                           p12 * dx * (1 - dy) +
+                           p21 * (1 - dx) * dy +
+                           p22 * dx * dy;
+        
+        dst_data[(y * dst_width + x) * channels + c] = (unsigned char)std::round(interpolated);
+      }
+    }
+  }
+  
+  return dst_data;
+}
+
 
 
 int main(int, char **) {
@@ -256,6 +299,11 @@ int main(int, char **) {
       static GLuint carved_texture_id = 0;
       static int carved_width = 0;
       static bool carved_image_valid = false;
+        
+      // Static variables for primitive resized image
+      static unsigned char* primitive_resized_data = nullptr;
+      static GLuint primitive_texture_id = 0;
+      static bool primitive_image_valid = false;
       
       if (needs_recompute && image_loaded) {
         // Use iterative seam removal to reduce image width
@@ -304,8 +352,12 @@ int main(int, char **) {
       }
 
       ImGui::Text("Primitive Resized");
-      // ImGui::Image((ImTextureID)(intptr_t)primitive_tex_id,
-      //              ImVec2(target_scale, img_h));
+      if (primitive_image_valid && primitive_texture_id) {
+        ImGui::Image((ImTextureID)(intptr_t)primitive_texture_id, ImVec2(target_width, img_h));
+        ImGui::Text("Primitive resized image size: %dx%d (bilinear interpolation)", target_width, img_h);
+      } else {
+        ImGui::Text("Move the slider to see primitive resized result");
+      }
 
       ImGui::End();
     }
