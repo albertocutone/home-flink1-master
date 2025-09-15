@@ -32,6 +32,44 @@ unsigned char *load_image(const std::string &path, int &width, int &height,
   return pixels;
 }
 
+// Helper function to create/update OpenGL texture
+bool create_or_update_texture(GLuint& texture_id, const void* data, int width, int height, const std::string& description) {
+  if (texture_id == 0) {
+    glGenTextures(1, &texture_id);
+    if (glGetError() != GL_NO_ERROR) {
+      spdlog::error("Failed to generate texture for {}", description);
+      return false;
+    }
+  }
+  
+  glBindTexture(GL_TEXTURE_2D, texture_id);
+  if (glGetError() != GL_NO_ERROR) {
+    spdlog::error("Failed to bind texture for {}", description);
+    return false;
+  }
+  
+  // Set pixel alignment
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, 
+               GL_UNSIGNED_BYTE, data);
+  
+  GLenum error = glGetError();
+  if (error != GL_NO_ERROR) {
+    spdlog::error("Failed to upload texture data for {}: OpenGL error {}", description, error);
+    stbi_image_free(data);
+    return false;
+  }
+  
+  spdlog::info("Successfully created/updated OpenGL texture for {}: {}x{}", description, width, height);
+  return true;
+}
+
 
 
 int main(int, char **) {
@@ -164,21 +202,14 @@ int main(int, char **) {
       if (!image_loaded) {
         image_data = load_image(img_path, img_w, img_h, img_channels);
         if (image_data) {
-          // Create OpenGL texture
-          glGenTextures(1, &original_texture_id);
-          glBindTexture(GL_TEXTURE_2D, original_texture_id);
-            
-          // Set pixel alignment - crucial for preventing stride issues
-          glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-            
-          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-          glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, img_w, img_h, 0, GL_RGB, GL_UNSIGNED_BYTE, image_data);
-            
           spdlog::info("Image loaded successfully: {}x{}x{}", img_w, img_h, img_channels);
-          image_loaded = true;
+          
+          // Create OpenGL texture using helper function
+          if (create_or_update_texture(original_texture_id, image_data, img_w, img_h, "original image")) {
+            image_loaded = true;
+          } else {
+            return 1;
+          }
         } else {
           spdlog::error("Failed to load image: {}", img_path);
           return 1;
@@ -245,25 +276,23 @@ int main(int, char **) {
         carved_width = final_width;
         
         // Create/update OpenGL texture for carved image
-        if (carved_texture_id == 0) {
-          glGenTextures(1, &carved_texture_id);
-        }
-        glBindTexture(GL_TEXTURE_2D, carved_texture_id);
-        
-        // Set pixel alignment for carved image texture too
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-        
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, carved_width, img_h, 0, GL_RGB, 
-                     GL_UNSIGNED_BYTE, carved_image_data.data());
+        carved_image_valid = create_or_update_texture(carved_texture_id, carved_image_data.data(), carved_width, img_h, "carved image");
       
+        // Create primitive resized image using bilinear interpolation
+        spdlog::info("Creating primitive resized image using bilinear interpolation: {}x{} -> {}x{}", 
+                     img_w, img_h, target_width, img_h);
         
-        carved_image_valid = true;
-        spdlog::info("Created OpenGL texture for carved image: {}x{}", carved_width, img_h);
+        // Clean up previous primitive resized data
+        if (primitive_resized_data) {
+          delete[] primitive_resized_data;
+        }
+        
+        // Create resized pixel array using bilinear interpolation (horizontal scaling only)
+        primitive_resized_data = downscale_image_bilinear(
+            image_data, img_w, img_h, img_channels, target_width, img_h);
+        
+        // Create/update OpenGL texture for primitive resized image
+        primitive_image_valid = create_or_update_texture(primitive_texture_id, primitive_resized_data, target_width, img_h, "primitive resized image");
       }
 
       ImGui::Text("Processed (Seam Carved)");
