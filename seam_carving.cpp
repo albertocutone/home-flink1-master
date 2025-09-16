@@ -1,7 +1,6 @@
 #include "seam_carving.h"
-#include <limits>
+#include "gpu_energy.h"
 #include <algorithm>
-#include <cmath>
 #include <chrono>
 #include <spdlog/spdlog.h>
 
@@ -116,36 +115,21 @@ std::vector<int> find_low_energy_seam(
 }
 
 std::vector<std::vector<float>> calculate_energy(
-    const unsigned char* pixels, int width, int height, int channels) {
-  
-  std::vector<std::vector<float>> energy(height, std::vector<float>(width, 0.0f));
-  
-  // Sobel kernels
-  int sobel_x[3][3] = {{-1, 0, 1}, {-2, 0, 2}, {-1, 0, 1}};
-  int sobel_y[3][3] = {{-1, -2, -1}, {0, 0, 0}, {1, 2, 1}};
-  
-  for (int y = 1; y < height - 1; y++) {
-    for (int x = 1; x < width - 1; x++) {
-      float gx = 0, gy = 0;
-      
-      // Apply Sobel kernels with proper convolution
-      for (int ky = -1; ky <= 1; ky++) {
-        for (int kx = -1; kx <= 1; kx++) {
-          int idx = ((y + ky) * width + (x + kx)) * channels;
-          
-          // Convert to grayscale
-          float gray = 0.299f * pixels[idx] + 0.587f * pixels[idx + 1] + 0.114f * pixels[idx + 2];
-          
-          gx += gray * sobel_x[ky + 1][kx + 1];
-          gy += gray * sobel_y[ky + 1][kx + 1];
-        }
-      }
-      
-      energy[y][x] = sqrt(gx * gx + gy * gy);
-    }
-  }
-  
-  return energy;
+    const unsigned char* pixels, 
+    int width, 
+    int height, 
+    int channels
+) {
+    auto start_time = std::chrono::high_resolution_clock::now();
+    
+    // Use GPU energy calculation
+    auto gpu_result = GPUEnergy::calculate_energy_gpu(pixels, width, height, channels);
+    
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+    spdlog::info("GPU energy calculation completed in {:.2f}ms", duration.count() / 1000.0);
+    
+    return gpu_result;
 }
 
 std::vector<unsigned char> remove_seam(

@@ -12,6 +12,7 @@
 #include <stb_image.h>
 
 #include "seam_carving.h"
+#include "gpu_energy.h"
 
 #include <cmath>
 
@@ -179,6 +180,13 @@ int main(int, char **) {
     spdlog::error("Failed to initialize GLAD");
     return -1;
   }
+  
+  // Initialize GPU energy calculation (after OpenGL context is created)
+  if (!GPUEnergy::initialize()) {
+    spdlog::error("Failed to initialize GPU energy calculation");
+    return 1;
+  }
+  
   ImGui_ImplGlfw_InitForOpenGL(window, true);
   ImGui_ImplOpenGL3_Init(glsl_version);
 
@@ -411,6 +419,9 @@ int main(int, char **) {
   if (primitive_resized_data) {
     delete[] primitive_resized_data;
   }
+
+  // Cleanup GPU energy calculation
+  GPUEnergy::cleanup();
 
   // Cleanup ImGui and GLFW
   ImGui_ImplOpenGL3_Shutdown();

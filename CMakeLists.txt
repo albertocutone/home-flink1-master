@@ -9,6 +9,11 @@ project (Flink-Home DESCRIPTION "Flink-Home" LANGUAGES CXX)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # for clangd
 
+# Add aggressive optimizations for GPU energy calculation performance
+if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    add_compile_options(-march=native -mtune=native -O3 -ftree-vectorize)
+endif()
+
 ## Find dependencies
 # libraries list
 set(libraries)
@@ -29,6 +34,7 @@ set(libraries ${libraries} fmt::fmt)
 add_executable(Flink-Home
     ${CMAKE_SOURCE_DIR}/main.cpp
     ${CMAKE_SOURCE_DIR}/seam_carving.cpp
+    ${CMAKE_SOURCE_DIR}/gpu_energy.cpp
 )
 
 target_include_directories(
